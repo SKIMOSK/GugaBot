@@ -1,7 +1,6 @@
 import threading
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSlot
-from PyQt6.QtGui import QFont, QTextCursor
 from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -9,8 +8,6 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QPushButton,
-    QScrollBar,
-    QSizePolicy,
     QSplitter,
     QTextEdit,
     QVBoxLayout,
@@ -21,18 +18,19 @@ from gugabot.ai.ancuta import AncutaAI
 from gugabot.ai.buftea import BufteaAI
 from gugabot.config import Config
 from gugabot.logger import ActivityLogger
+from gugabot.sounds import SoundManager
 from gugabot.ui.settings_dialog import SettingsDialog
 from gugabot.ui.styles import STYLESHEET
 from gugabot.voice import VoiceListener
 
-# Log level → HTML colour mapping
+# Log-level → HTML colour
 LOG_COLORS = {
-    "info":     "#8b949e",
-    "action":   "#39d353",
-    "response": "#e6edf3",
-    "error":    "#f85149",
-    "wake":     "#00d26a",
-    "system":   "#6a737d",
+    "info":     "#6aaa88",
+    "action":   "#00ff88",
+    "response": "#c5e8d5",
+    "error":    "#ff3355",
+    "wake":     "#00e5cc",
+    "system":   "#3a6050",
 }
 
 
@@ -51,17 +49,24 @@ class MainWindow(QMainWindow):
         self.ancuta = ancuta
         self.buftea = buftea
         self.voice = voice
+        self.sounds = SoundManager()
+        self.sounds.enabled = config.get("sounds_enabled", True)
 
         self.setWindowTitle("GugaBot")
-        self.setMinimumSize(900, 620)
-        self.resize(1100, 700)
+        self.setMinimumSize(920, 640)
+        self.resize(1140, 720)
         self.setStyleSheet(STYLESHEET)
+
+        # Confirm banner widget (created lazily, inserted into log panel)
+        self._confirm_banner: QFrame | None = None
+        self._confirm_timer: QTimer | None = None
+        self._confirm_countdown = 0
 
         self._build_ui()
         self._connect_signals()
         self._post_init()
 
-    # ------------------------------------------------------------------ UI build
+    # ═══════════════════════════════════════════════ UI build
     def _build_ui(self):
         root = QWidget()
         self.setCentralWidget(root)
@@ -73,29 +78,33 @@ class MainWindow(QMainWindow):
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setObjectName("content")
-        splitter.setHandleWidth(1)
-        splitter.setStyleSheet("QSplitter::handle { background-color: #21262d; }")
+        splitter.setHandleWidth(3)
         splitter.addWidget(self._left_panel())
         splitter.addWidget(self._right_panel())
-        splitter.setSizes([280, 820])
+        splitter.setSizes([290, 850])
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         vbox.addWidget(splitter, 1)
 
         vbox.addWidget(self._bottom_bar())
 
-    # ---- Header -------------------------------------------------------
+    # ── Header ────────────────────────────────────────────────────────
     def _header(self) -> QFrame:
         hdr = QFrame()
         hdr.setObjectName("header")
-        hdr.setFixedHeight(56)
+        hdr.setFixedHeight(58)
         lay = QHBoxLayout(hdr)
-        lay.setContentsMargins(20, 0, 20, 0)
-        lay.setSpacing(10)
+        lay.setContentsMargins(22, 0, 22, 0)
+        lay.setSpacing(12)
 
         title = QLabel("GugaBot")
         title.setObjectName("app_title")
         lay.addWidget(title)
+
+        version = QLabel("v2.0")
+        version.setObjectName("status_text")
+        version.setStyleSheet("color: #2e6045; font-size: 11px; margin-left: 4px;")
+        lay.addWidget(version)
 
         lay.addStretch()
 
@@ -107,7 +116,7 @@ class MainWindow(QMainWindow):
         self._status_lbl.setObjectName("status_text")
         lay.addWidget(self._status_lbl)
 
-        lay.addSpacing(12)
+        lay.addSpacing(14)
 
         settings_btn = QPushButton("⚙")
         settings_btn.setObjectName("icon_btn")
@@ -118,67 +127,76 @@ class MainWindow(QMainWindow):
 
         return hdr
 
-    # ---- Left panel ---------------------------------------------------
+    # ── Left panel ────────────────────────────────────────────────────
     def _left_panel(self) -> QWidget:
         panel = QFrame()
         panel.setObjectName("panel")
-        panel.setMinimumWidth(240)
-        panel.setMaximumWidth(320)
+        panel.setMinimumWidth(250)
+        panel.setMaximumWidth(340)
         lay = QVBoxLayout(panel)
         lay.setContentsMargins(16, 16, 16, 16)
         lay.setSpacing(10)
 
-        # ── Ancuța section ──────────────────
-        ancuta_title = QLabel("Ancuța AI")
-        ancuta_title.setObjectName("section_title")
-        lay.addWidget(ancuta_title)
+        # ── Ancuța ──────────────────────────────
+        a_title = QLabel("Ancuța AI")
+        a_title.setObjectName("section_title")
+        lay.addWidget(a_title)
 
-        ancuta_desc = QLabel("Quick tasks · Gemini 1.5 Flash\nWake word: \"GugaBot\"")
-        ancuta_desc.setObjectName("section_desc")
-        ancuta_desc.setWordWrap(True)
-        lay.addWidget(ancuta_desc)
+        a_desc = QLabel("Quick tasks · Gemini 1.5 Flash\nWake word: \"GugaBot\"")
+        a_desc.setObjectName("section_desc")
+        a_desc.setWordWrap(True)
+        lay.addWidget(a_desc)
 
-        self._ancuta_status = QLabel("● Listening" if self.voice.available else "● Ready")
+        self._ancuta_status = QLabel(
+            "● Listening" if self.voice.available else "● Ready"
+        )
         self._ancuta_status.setObjectName("ai_status_active")
         lay.addWidget(self._ancuta_status)
 
-        # Manual text input for Ancuța
-        ancuta_row = QHBoxLayout()
-        ancuta_row.setSpacing(6)
+        row = QHBoxLayout()
+        row.setSpacing(6)
         self._ancuta_input = QLineEdit()
         self._ancuta_input.setObjectName("ancuta_input")
         self._ancuta_input.setPlaceholderText("Quick command…")
         self._ancuta_input.returnPressed.connect(self._send_ancuta)
-        ancuta_row.addWidget(self._ancuta_input)
+        row.addWidget(self._ancuta_input)
 
-        send_ancuta = QPushButton("→")
-        send_ancuta.setObjectName("send_btn")
-        send_ancuta.setFixedWidth(32)
-        send_ancuta.setToolTip("Send to Ancuța AI")
-        send_ancuta.clicked.connect(self._send_ancuta)
-        ancuta_row.addWidget(send_ancuta)
-        lay.addLayout(ancuta_row)
+        send_btn = QPushButton("→")
+        send_btn.setObjectName("send_btn")
+        send_btn.setFixedWidth(32)
+        send_btn.setToolTip("Send to Ancuța AI")
+        send_btn.clicked.connect(self._send_ancuta)
+        row.addWidget(send_btn)
+        lay.addLayout(row)
 
         lay.addWidget(self._divider())
 
-        # ── Buftea section ──────────────────
-        buftea_title = QLabel("Buftea AI")
-        buftea_title.setObjectName("section_title")
-        lay.addWidget(buftea_title)
+        # ── Buftea ──────────────────────────────
+        b_title = QLabel("Buftea AI")
+        b_title.setObjectName("section_title")
+        lay.addWidget(b_title)
 
-        buftea_desc = QLabel("Full PC control · Gemini 2.5 Pro\nSees your screen")
-        buftea_desc.setObjectName("section_desc")
-        buftea_desc.setWordWrap(True)
-        lay.addWidget(buftea_desc)
+        b_desc = QLabel("Full PC control · Gemini 2.5 Pro\nSees your screen")
+        b_desc.setObjectName("section_desc")
+        b_desc.setWordWrap(True)
+        lay.addWidget(b_desc)
 
         self._buftea_status = QLabel("● Idle")
         self._buftea_status.setObjectName("ai_status_idle")
+        self._buftea_status.setStyleSheet("color: #3a6050; font-size: 12px; font-weight: 600;")
         lay.addWidget(self._buftea_status)
+
+        # Session token usage mini-bar
+        self._session_lbl = QLabel("Session tokens: —")
+        self._session_lbl.setObjectName("section_desc")
+        lay.addWidget(self._session_lbl)
 
         self._buftea_input = QTextEdit()
         self._buftea_input.setObjectName("prompt_input")
-        self._buftea_input.setPlaceholderText("Describe a task for Buftea AI…\ne.g. Open Chrome and search for cats")
-        self._buftea_input.setFixedHeight(90)
+        self._buftea_input.setPlaceholderText(
+            "Describe a task for Buftea AI…\ne.g. Open Chrome and search for cats"
+        )
+        self._buftea_input.setFixedHeight(88)
         lay.addWidget(self._buftea_input)
 
         self._start_btn = QPushButton("▶  Start Buftea AI")
@@ -189,13 +207,12 @@ class MainWindow(QMainWindow):
         self._stop_btn = QPushButton("■  Stop")
         self._stop_btn.setObjectName("stop_btn")
         self._stop_btn.setEnabled(False)
+        self._stop_btn.setToolTip("Stop all AI  (or say \"Guga stop\")")
         self._stop_btn.clicked.connect(self._stop_all)
-        self._stop_btn.setToolTip("Stop all AI activity  (or say \"Guga stop\")")
         lay.addWidget(self._stop_btn)
 
         lay.addStretch()
 
-        # Voice indicator
         if self.voice.available:
             self._voice_lbl = QLabel("🎤  Voice active")
         else:
@@ -206,11 +223,11 @@ class MainWindow(QMainWindow):
 
         return panel
 
-    # ---- Right panel (log) -------------------------------------------
+    # ── Right panel (log + confirm banner) ───────────────────────────
     def _right_panel(self) -> QWidget:
-        panel = QFrame()
-        panel.setObjectName("panel")
-        lay = QVBoxLayout(panel)
+        self._right_frame = QFrame()
+        self._right_frame.setObjectName("panel")
+        lay = QVBoxLayout(self._right_frame)
         lay.setContentsMargins(16, 14, 16, 14)
         lay.setSpacing(8)
 
@@ -227,21 +244,27 @@ class MainWindow(QMainWindow):
         hdr.addWidget(clear_btn)
         lay.addLayout(hdr)
 
+        # Placeholder widget for confirm banner — inserted above log
+        self._banner_slot = QWidget()
+        self._banner_slot.setVisible(False)
+        self._banner_slot_layout = QVBoxLayout(self._banner_slot)
+        self._banner_slot_layout.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(self._banner_slot)
+
         self._log = QTextEdit()
         self._log.setObjectName("log_display")
         self._log.setReadOnly(True)
         lay.addWidget(self._log, 1)
 
-        return panel
+        return self._right_frame
 
-    # ---- Bottom bar --------------------------------------------------
+    # ── Bottom bar ───────────────────────────────────────────────────
     def _bottom_bar(self) -> QFrame:
         bar = QFrame()
         bar.setObjectName("bottom_bar")
-        bar.setFixedHeight(36)
+        bar.setFixedHeight(34)
         lay = QHBoxLayout(bar)
         lay.setContentsMargins(16, 0, 16, 0)
-        lay.setSpacing(0)
 
         self._model_lbl = QLabel(self._model_text())
         self._model_lbl.setObjectName("status_bar_text")
@@ -255,7 +278,7 @@ class MainWindow(QMainWindow):
 
         return bar
 
-    # ---- Misc helpers ------------------------------------------------
+    # ── Helpers ──────────────────────────────────────────────────────
     def _divider(self) -> QFrame:
         d = QFrame()
         d.setObjectName("divider")
@@ -274,47 +297,55 @@ class MainWindow(QMainWindow):
         b = usage.get("buftea", {})
         ta = a.get("tokens_in", 0) + a.get("tokens_out", 0)
         tb = b.get("tokens_in", 0) + b.get("tokens_out", 0)
-        return f"Ancuța: {ta:,} tokens   |   Buftea: {tb:,} tokens"
+        return f"Ancuța: {ta:,} tok   |   Buftea: {tb:,} tok"
 
-    # ------------------------------------------------------------------ Signals
+    # ═══════════════════════════════════════════════ Signals
     def _connect_signals(self):
         self.logger.log_added.connect(self._on_log)
         self.buftea.status_changed.connect(self._on_buftea_status)
+        self.buftea.confirmation_needed.connect(self._on_confirmation_needed)
 
         if self.voice.available:
             self.voice.wake_word_detected.connect(self._on_wake_word)
             self.voice.command_detected.connect(self._on_voice_command)
             self.voice.status_changed.connect(self._on_voice_status)
 
-    # ------------------------------------------------------------------ Slots
+    # ═══════════════════════════════════════════════ Slots
     @pyqtSlot(str, str, str)
     def _on_log(self, ts: str, level: str, msg: str):
-        color = LOG_COLORS.get(level, "#8b949e")
-        ts_html = f'<span style="color:#6a737d">[{ts}]</span>'
+        color = LOG_COLORS.get(level, "#6aaa88")
+        ts_html = f'<span style="color:#2e6045">[{ts}]</span>'
         msg_html = f'<span style="color:{color}">{_escape_html(msg)}</span>'
         self._log.append(f"{ts_html} {msg_html}")
-        # Auto-scroll
-        sb = self._log.verticalScrollBar()
-        sb.setValue(sb.maximum())
-        # Refresh token counter
+        self._log.verticalScrollBar().setValue(self._log.verticalScrollBar().maximum())
         self._token_lbl.setText(self._token_text())
+
+        # Trigger sounds based on log level
+        if level == "error":
+            self.sounds.error()
+        elif level == "action":
+            self.sounds.action()
+        elif level == "wake":
+            self.sounds.wake()
 
     @pyqtSlot(str)
     def _on_buftea_status(self, state: str):
         if state == "running":
             self._buftea_status.setText("● Running")
-            self._buftea_status.setObjectName("ai_status_active")
-            self._buftea_status.setStyleSheet("color: #39d353; font-size: 12px; font-weight: 500;")
+            self._buftea_status.setStyleSheet("color: #00ff88; font-size: 12px; font-weight: 600;")
             self._start_btn.setEnabled(False)
             self._stop_btn.setEnabled(True)
             self._set_status("Buftea Active", "active")
         else:
             self._buftea_status.setText("● Idle")
-            self._buftea_status.setObjectName("ai_status_idle")
-            self._buftea_status.setStyleSheet("color: #6a737d; font-size: 12px; font-weight: 500;")
+            self._buftea_status.setStyleSheet("color: #3a6050; font-size: 12px; font-weight: 600;")
             self._start_btn.setEnabled(True)
             self._stop_btn.setEnabled(False)
             self._set_status("Idle", "idle")
+            self.sounds.done()
+            self._session_lbl.setText(
+                f"Session tokens: {self.buftea._session_tokens:,}"
+            )
 
     @pyqtSlot(str)
     def _on_wake_word(self, word: str):
@@ -338,7 +369,87 @@ class MainWindow(QMainWindow):
         else:
             self._set_status("Idle", "idle")
 
-    # ------------------------------------------------------------------ Actions
+    # ═══════════════════════════════════════════════ Confirmation banner
+    @pyqtSlot(str, str)
+    def _on_confirmation_needed(self, label: str, details: str):
+        self.sounds.confirm()
+        self.logger.log(f"⚠ Confirmation required: {label}", "error")
+        self._show_confirm_banner(label, details)
+
+    def _show_confirm_banner(self, label: str, details: str):
+        # Remove any existing banner
+        self._hide_confirm_banner()
+
+        banner = QFrame()
+        banner.setObjectName("confirm_banner")
+        bl = QVBoxLayout(banner)
+        bl.setContentsMargins(14, 10, 14, 10)
+        bl.setSpacing(6)
+
+        title_row = QHBoxLayout()
+        title_lbl = QLabel(f"⚠  {label}")
+        title_lbl.setObjectName("confirm_banner_title")
+        title_row.addWidget(title_lbl)
+        title_row.addStretch()
+
+        self._timer_lbl = QLabel("120s")
+        self._timer_lbl.setObjectName("confirm_banner_timer")
+        title_row.addWidget(self._timer_lbl)
+        bl.addLayout(title_row)
+
+        det_lbl = QLabel(details[:200] + ("…" if len(details) > 200 else ""))
+        det_lbl.setObjectName("confirm_banner_detail")
+        det_lbl.setWordWrap(True)
+        bl.addWidget(det_lbl)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+
+        deny_btn = QPushButton("✕  Deny")
+        deny_btn.setObjectName("confirm_no_btn")
+        deny_btn.clicked.connect(lambda: self._respond_confirm(False))
+        btn_row.addWidget(deny_btn)
+
+        allow_btn = QPushButton("✓  Allow")
+        allow_btn.setObjectName("confirm_yes_btn")
+        allow_btn.clicked.connect(lambda: self._respond_confirm(True))
+        btn_row.addWidget(allow_btn)
+        bl.addLayout(btn_row)
+
+        self._confirm_banner = banner
+        self._banner_slot_layout.addWidget(banner)
+        self._banner_slot.setVisible(True)
+
+        # Countdown timer (auto-deny at 0)
+        self._confirm_countdown = 120
+        self._confirm_timer = QTimer(self)
+        self._confirm_timer.timeout.connect(self._tick_confirm)
+        self._confirm_timer.start(1000)
+
+    def _tick_confirm(self):
+        self._confirm_countdown -= 1
+        if self._timer_lbl:
+            self._timer_lbl.setText(f"{self._confirm_countdown}s")
+        if self._confirm_countdown <= 0:
+            self._respond_confirm(False)
+
+    def _respond_confirm(self, confirmed: bool):
+        if self._confirm_timer:
+            self._confirm_timer.stop()
+            self._confirm_timer = None
+        self._hide_confirm_banner()
+        self.buftea.respond_confirmation(confirmed)
+        verb = "allowed" if confirmed else "denied"
+        self.logger.log(f"Dangerous action {verb}.", "system")
+
+    def _hide_confirm_banner(self):
+        if self._confirm_banner:
+            self._banner_slot_layout.removeWidget(self._confirm_banner)
+            self._confirm_banner.deleteLater()
+            self._confirm_banner = None
+        self._banner_slot.setVisible(False)
+
+    # ═══════════════════════════════════════════════ User actions
     def _send_ancuta(self):
         text = self._ancuta_input.text().strip()
         if not text:
@@ -352,20 +463,24 @@ class MainWindow(QMainWindow):
         if not prompt:
             self.logger.log("Enter a task for Buftea AI first.", "error")
             return
-        # Tell Buftea about this window so it avoids clicking on us
         pos = self.pos()
         sz = self.size()
         self.buftea.set_window_rect(pos.x(), pos.y(), sz.width(), sz.height())
+        self._session_lbl.setText("Session tokens: 0")
         self.buftea.start_task(prompt)
 
     def _stop_all(self):
         self.ancuta.stop()
         self.buftea.stop()
+        # If a confirm is pending, auto-deny it
+        if self._confirm_banner:
+            self._respond_confirm(False)
         self._stop_btn.setEnabled(False)
         self._start_btn.setEnabled(True)
         self._buftea_status.setText("● Idle")
-        self._buftea_status.setStyleSheet("color: #6a737d; font-size: 12px; font-weight: 500;")
+        self._buftea_status.setStyleSheet("color: #3a6050; font-size: 12px; font-weight: 600;")
         self._set_status("Idle", "idle")
+        self.sounds.stop()
         self.logger.log("All AI stopped.", "system")
 
     def _open_settings(self):
@@ -373,6 +488,7 @@ class MainWindow(QMainWindow):
         if dlg.exec():
             self.ancuta.update_client()
             self.buftea.update_client()
+            self.sounds.enabled = self.config.get("sounds_enabled", True)
             self._model_lbl.setText(self._model_text())
             self._token_lbl.setText(self._token_text())
 
@@ -380,22 +496,27 @@ class MainWindow(QMainWindow):
         self._log.clear()
         self.logger.clear()
 
-    # ------------------------------------------------------------------ Helpers
+    # ═══════════════════════════════════════════════ Helpers
     def _set_status(self, text: str, state: str):
         self._status_lbl.setText(text)
-        colours = {"idle": "#6a737d", "active": "#39d353", "error": "#f85149"}
-        c = colours.get(state, "#6a737d")
+        colours = {"idle": "#3a6050", "active": "#00ff88", "error": "#ff3355"}
+        c = colours.get(state, "#3a6050")
         self._dot.setStyleSheet(f"color: {c}; font-size: 18px;")
 
     def _post_init(self):
         self.logger.log("GugaBot started.", "system")
         if not self.config.get("api_key"):
-            self.logger.log("No API key set — open ⚙ Settings to add your OpenRouter key.", "error")
+            self.logger.log("No API key set — open ⚙ Settings to configure.", "error")
         if self.voice.available:
             self.voice.start()
-            self.logger.log("Voice listener active — say \"GugaBot\" to wake Ancuța AI.", "system")
+            self.logger.log(
+                'Voice active — say "GugaBot" to wake Ancuța AI, "Guga stop" to halt.',
+                "system",
+            )
         else:
-            self.logger.log("Voice unavailable — install pyaudio for voice activation.", "system")
+            self.logger.log(
+                "Voice unavailable — install pyaudio for voice control.", "system"
+            )
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────

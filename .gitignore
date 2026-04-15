@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pdb
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+*.whl
+.installed.cfg
+pip-selfcheck.json
+MANIFEST
+
+# Virtual envs
+.venv/
+venv/
+env/
+ENV/
+.env
+
+# IDE / editors
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# GugaBot user data (stored in ~/.gugabot, not here)
+settings.json
+
+# Logs
+*.log
+logs/
+
+# SKI
+SKI
+ski/
+*.ski
+.ski
+
+# Temp / OS
+*.tmp
+*.bak
+*.orig
+desktop.ini

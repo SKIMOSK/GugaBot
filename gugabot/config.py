@@ -11,6 +11,11 @@ class Config:
         "screenshot_interval": 10,
         "voice_enabled": True,
         "theme": "dark",
+        # Buftea safety / token limits
+        "buftea_max_tokens_per_request": 1024,
+        "buftea_max_tokens_per_session": 0,   # 0 = unlimited
+        "buftea_allow_dangerous_no_ask": False,
+        "sounds_enabled": True,
         "usage": {
             "ancuta": {"tokens_in": 0, "tokens_out": 0, "requests": 0},
             "buftea": {"tokens_in": 0, "tokens_out": 0, "requests": 0},
@@ -27,8 +32,7 @@ class Config:
             try:
                 with open(self.config_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                merged = self._deep_merge(self.DEFAULT_SETTINGS.copy(), data)
-                return merged
+                return self._deep_merge(self._deep_copy(self.DEFAULT_SETTINGS), data)
             except (json.JSONDecodeError, OSError):
                 pass
         return self._deep_copy(self.DEFAULT_SETTINGS)
@@ -62,10 +66,10 @@ class Config:
 
     def add_usage(self, agent: str, tokens_in: int, tokens_out: int):
         usage = self.settings.setdefault("usage", {})
-        agent_usage = usage.setdefault(agent, {"tokens_in": 0, "tokens_out": 0, "requests": 0})
-        agent_usage["tokens_in"] += tokens_in
-        agent_usage["tokens_out"] += tokens_out
-        agent_usage["requests"] += 1
+        au = usage.setdefault(agent, {"tokens_in": 0, "tokens_out": 0, "requests": 0})
+        au["tokens_in"] += tokens_in
+        au["tokens_out"] += tokens_out
+        au["requests"] += 1
         self.save()
 
     def reset_usage(self):
