@@ -19,6 +19,7 @@ from gugabot.ai.buftea import BufteaAI
 from gugabot.config import Config
 from gugabot.logger import ActivityLogger
 from gugabot.sounds import SoundManager
+from gugabot.ui.mini_window import MiniWindow
 from gugabot.ui.settings_dialog import SettingsDialog
 from gugabot.ui.styles import STYLESHEET
 from gugabot.voice import VoiceListener
@@ -61,6 +62,8 @@ class MainWindow(QMainWindow):
         self._confirm_banner: QFrame | None = None
         self._confirm_timer: QTimer | None = None
         self._confirm_countdown = 0
+
+        self._mini: MiniWindow | None = None
 
         self._build_ui()
         self._connect_signals()
@@ -117,6 +120,13 @@ class MainWindow(QMainWindow):
         lay.addWidget(self._status_lbl)
 
         lay.addSpacing(14)
+
+        mini_btn = QPushButton("⊟")
+        mini_btn.setObjectName("icon_btn")
+        mini_btn.setFixedSize(36, 36)
+        mini_btn.setToolTip("Collapse to mini overlay  (top-right corner, always on top)")
+        mini_btn.clicked.connect(self._go_mini)
+        lay.addWidget(mini_btn)
 
         settings_btn = QPushButton("⚙")
         settings_btn.setObjectName("icon_btn")
@@ -482,6 +492,19 @@ class MainWindow(QMainWindow):
         self._set_status("Idle", "idle")
         self.sounds.stop()
         self.logger.log("All AI stopped.", "system")
+
+    def _go_mini(self):
+        """Collapse main window; show the always-on-top mini overlay."""
+        if self._mini is None:
+            self._mini = MiniWindow(
+                main_window=self,
+                ancuta=self.ancuta,
+                buftea=self.buftea,
+                logger=self.logger,
+                sounds=self.sounds,
+            )
+        self.hide()
+        self._mini.show_top_right()
 
     def _open_settings(self):
         dlg = SettingsDialog(self.config, parent=self)

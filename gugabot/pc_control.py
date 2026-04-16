@@ -14,6 +14,15 @@ pyautogui.PAUSE = 0.25
 
 
 class PCController:
+    """Wraps pyautogui with DPI-aware screenshot scaling."""
+
+    def __init__(self):
+        # Scale factors: multiply AI-image coords by these to get logical screen coords.
+        # Updated every time take_screenshot_base64() is called.
+        self.last_scale_x: float = 1.0
+        self.last_scale_y: float = 1.0
+
+    # ── Input ──────────────────────────────────────────────────────────
     def click(self, x: int, y: int):
         pyautogui.click(x, y)
         time.sleep(0.1)
@@ -30,7 +39,6 @@ class PCController:
         pyautogui.moveTo(x, y, duration=0.3)
 
     def type_text(self, text: str, interval: float = 0.04):
-        # typewrite has issues with unicode; use pyperclip + paste for reliability
         try:
             import pyperclip
             pyperclip.copy(text)
@@ -53,20 +61,49 @@ class PCController:
         pyautogui.moveTo(x1, y1)
         pyautogui.dragTo(x2, y2, duration=duration, button="left")
 
+    # ── Screenshot ─────────────────────────────────────────────────────
     def take_screenshot(self) -> Image.Image:
         return pyautogui.screenshot()
 
     def take_screenshot_base64(self, max_width: int = 1280) -> str:
+        """
+        Capture the screen and return a base64-encoded PNG.
+
+        Handles Windows DPI scaling: pyautogui.screenshot() returns physical
+        pixels, but pyautogui.click() uses logical pixels.  We normalise the
+        image to the logical resolution first so that coordinates the AI reads
+        off the image map directly to what pyautogui.click() expects.
+
+        self.last_scale_x / last_scale_y are set here and used by BufteaAI
+        to convert any further AI-image coords → logical screen coords if the
+        image was additionally downscaled for token efficiency.
+        """
         img = self.take_screenshot()
-        # Downscale if very large to save tokens
-        w, h = img.size
-        if w > max_width:
-            ratio = max_width / w
-            img = img.resize((max_width, int(h * ratio)), Image.LANCZOS)
+        phys_w, phys_h = img.size
+
+        # Step 1 — normalise to logical resolution (DPI fix)
+        logical_w, logical_h = pyautogui.size()
+        if phys_w != logical_w or phys_h != logical_h:
+            img = img.resize((logical_w, logical_h), Image.LANCZOS)
+
+        cur_w, cur_h = img.size  # now equals logical resolution
+
+        # Step 2 — downscale for token efficiency
+        if cur_w > max_width:
+            ratio = max_width / cur_w
+            img = img.resize((max_width, int(cur_h * ratio)), Image.LANCZOS)
+
+        final_w, final_h = img.size
+
+        # Store scale so BufteaAI can convert AI coords → screen coords
+        self.last_scale_x = logical_w / final_w
+        self.last_scale_y = logical_h / final_h
+
         buf = io.BytesIO()
         img.save(buf, format="PNG", optimize=True)
         return base64.b64encode(buf.getvalue()).decode("utf-8")
 
+    # ── App / system ───────────────────────────────────────────────────
     def open_app(self, app_name: str):
         system = platform.system()
         try:
@@ -77,12 +114,10 @@ class PCController:
             else:
                 subprocess.Popen([app_name])
         except (FileNotFoundError, OSError):
-            # Try with 'xdg-open' on Linux
             if system == "Linux":
                 subprocess.Popen(["xdg-open", app_name])
 
     def medal_clip(self):
-        # Medal default clip hotkey — users can change in Medal settings
         pyautogui.hotkey("ctrl", "f8")
 
     def get_screen_size(self) -> tuple[int, int]:

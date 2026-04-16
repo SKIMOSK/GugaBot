@@ -84,6 +84,10 @@ class BufteaAI(QObject):
         # Session token tracking
         self._session_tokens = 0
 
+        # Last-known screenshot→screen scale (set after each screenshot)
+        self._scale_x: float = 1.0
+        self._scale_y: float = 1.0
+
     # ── BaseAI helpers (inlined) ───────────────────────────────────────
     def _refresh_client(self):
         api_key = self.config.get("api_key", "")
@@ -196,8 +200,15 @@ class BufteaAI(QObject):
                 f"FORBIDDEN zone (GugaBot app): x={r['x']}–{r['x'] + r['width']}, "
                 f"y={r['y']}–{r['y'] + r['height']}. Do NOT click inside this area."
             )
-        w, h = self.pc.get_screen_size()
-        lines.append(f"Screen resolution: {w}×{h}")
+        logical_w, logical_h = self.pc.get_screen_size()
+        lines.append(f"Logical screen resolution: {logical_w}×{logical_h}")
+        # Tell the AI the image size it will see so coords are unambiguous
+        img_w = int(logical_w / max(self._scale_x, 1.0))
+        img_h = int(logical_h / max(self._scale_y, 1.0))
+        lines.append(
+            f"The screenshot image dimensions are {img_w}×{img_h}. "
+            f"Use coordinates as seen in the image — they are auto-scaled to screen space."
+        )
         return "\n".join(lines) if lines else ""
 
     # ------------------------------------------------------------------
@@ -208,8 +219,11 @@ class BufteaAI(QObject):
         max_req_tokens = int(self.config.get("buftea_max_tokens_per_request", 1024))
         max_session_tokens = int(self.config.get("buftea_max_tokens_per_session", 0))
 
-        context = self._build_context()
+        # Take initial screenshot and update scale factors first
         screenshot_b64 = self.pc.take_screenshot_base64()
+        self._scale_x = self.pc.last_scale_x
+        self._scale_y = self.pc.last_scale_y
+        context = self._build_context()
 
         system_content = SYSTEM_PROMPT + (f"\n\nCONTEXT:\n{context}" if context else "")
 
@@ -275,6 +289,8 @@ class BufteaAI(QObject):
                 break
 
             screenshot_b64 = self.pc.take_screenshot_base64()
+            self._scale_x = self.pc.last_scale_x
+            self._scale_y = self.pc.last_scale_y
             last_ss_time = time.time()
 
             messages.append({"role": "assistant", "content": raw})
@@ -310,7 +326,8 @@ class BufteaAI(QObject):
 
         # ── Standard actions ───────────────────────────────────────────
         if kind == "click":
-            x, y = int(action.get("x", 0)), int(action.get("y", 0))
+            x = int(action.get("x", 0) * self._scale_x)
+            y = int(action.get("y", 0) * self._scale_y)
             if self._is_forbidden(x, y):
                 return "skipped — forbidden zone"
             self.logger.log(f"Click ({x}, {y})", "action")
@@ -318,7 +335,8 @@ class BufteaAI(QObject):
             return "clicked"
 
         if kind == "right_click":
-            x, y = int(action.get("x", 0)), int(action.get("y", 0))
+            x = int(action.get("x", 0) * self._scale_x)
+            y = int(action.get("y", 0) * self._scale_y)
             if self._is_forbidden(x, y):
                 return "skipped — forbidden zone"
             self.logger.log(f"Right-click ({x}, {y})", "action")
@@ -326,7 +344,8 @@ class BufteaAI(QObject):
             return "right-clicked"
 
         if kind == "double_click":
-            x, y = int(action.get("x", 0)), int(action.get("y", 0))
+            x = int(action.get("x", 0) * self._scale_x)
+            y = int(action.get("y", 0) * self._scale_y)
             if self._is_forbidden(x, y):
                 return "skipped — forbidden zone"
             self.logger.log(f"Double-click ({x}, {y})", "action")
@@ -346,7 +365,8 @@ class BufteaAI(QObject):
             return "pressed"
 
         if kind == "scroll":
-            x, y = int(action.get("x", 0)), int(action.get("y", 0))
+            x = int(action.get("x", 0) * self._scale_x)
+            y = int(action.get("y", 0) * self._scale_y)
             direction = action.get("direction", "down")
             amount = int(action.get("amount", 3))
             self.logger.log(f"Scroll {direction} at ({x},{y})", "action")
@@ -354,8 +374,10 @@ class BufteaAI(QObject):
             return "scrolled"
 
         if kind == "drag":
-            x1, y1 = int(action.get("x1", 0)), int(action.get("y1", 0))
-            x2, y2 = int(action.get("x2", 0)), int(action.get("y2", 0))
+            x1 = int(action.get("x1", 0) * self._scale_x)
+            y1 = int(action.get("y1", 0) * self._scale_y)
+            x2 = int(action.get("x2", 0) * self._scale_x)
+            y2 = int(action.get("y2", 0) * self._scale_y)
             self.logger.log(f"Drag ({x1},{y1}) → ({x2},{y2})", "action")
             self.pc.drag(x1, y1, x2, y2)
             return "dragged"
