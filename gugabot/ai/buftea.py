@@ -215,6 +215,14 @@ class BufteaAI(QObject):
     def _run(self, user_request: str):
         self.logger.log(f"Buftea AI starting: {user_request}", "wake")
         model = self.config.get("buftea_model", "google/gemini-2.5-pro")
+
+        # Migration: fix old Gemini model names
+        old_to_new = {
+            "google/gemini-pro-1.5": "google/gemini-1.5-pro",
+        }
+        if model in old_to_new:
+            model = old_to_new[model]
+            self.config.set("buftea_model", model)
         interval = float(self.config.get("screenshot_interval", 10))
         max_req_tokens = int(self.config.get("buftea_max_tokens_per_request", 0))
         max_session_tokens = int(self.config.get("buftea_max_tokens_per_session", 0))

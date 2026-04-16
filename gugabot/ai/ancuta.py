@@ -70,6 +70,16 @@ class AncutaAI(BaseAI):
         self.logger.log(f"Ancuța AI: {user_request}", "wake")
         model = self.config.get("ancuta_model", "google/gemini-1.5-flash")
 
+        # Migration: fix old Gemini model names (auto-correct + save)
+        old_to_new = {
+            "google/gemini-flash-1.5": "google/gemini-1.5-flash",
+            "google/gemini-flash-1.5-8b": "google/gemini-1.5-flash-8b",
+            "google/gemini-pro-1.5": "google/gemini-1.5-pro",
+        }
+        if model in old_to_new:
+            model = old_to_new[model]
+            self.config.set("ancuta_model", model)
+
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_request},
@@ -180,6 +190,14 @@ class AncutaAI(BaseAI):
         try:
             screenshot_b64 = self.pc.take_screenshot_base64()
             model = self.config.get("ancuta_model", "google/gemini-1.5-flash")
+
+            # Migration: fix old Gemini model names
+            old_to_new = {
+                "google/gemini-flash-1.5": "google/gemini-1.5-flash",
+                "google/gemini-flash-1.5-8b": "google/gemini-1.5-flash-8b",
+            }
+            if model in old_to_new:
+                model = old_to_new[model]
             resp = self._client.chat.completions.create(
                 model=model,
                 messages=[
