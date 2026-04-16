@@ -6,3 +6,5 @@ SpeechRecognition>=3.10.0
 pyaudio>=0.2.14
 pynput>=1.7.6
 requests>=2.31.0
+pygetwindow>=0.0.9
+pyperclip>=1.8.0

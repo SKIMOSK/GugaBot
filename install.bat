@@ -94,7 +94,8 @@ pip install ^
     "SpeechRecognition>=3.10.0" ^
     "pynput>=1.7.6" ^
     "requests>=2.31.0" ^
-    "pyperclip>=1.8.0"
+    "pyperclip>=1.8.0" ^
+    "pygetwindow>=0.0.9"
 
 if errorlevel 1 (
     echo.

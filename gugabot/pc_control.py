@@ -123,3 +123,36 @@ class PCController:
     def get_screen_size(self) -> tuple[int, int]:
         size = pyautogui.size()
         return size.width, size.height
+
+    # ── Window management ──────────────────────────────────────────────
+    def activate_window(self, title_substring: str) -> str:
+        """Bring the first window whose title contains title_substring to focus."""
+        try:
+            import pygetwindow as gw
+            matches = [w for w in gw.getAllWindows()
+                       if title_substring.lower() in w.title.lower() and w.title.strip()]
+            if not matches:
+                return f"no window found matching '{title_substring}'"
+            win = matches[0]
+            try:
+                win.restore()
+            except Exception:
+                pass
+            win.activate()
+            time.sleep(0.35)
+            return f"focused: {win.title}"
+        except ImportError:
+            # pygetwindow not installed — fall back to Alt+Tab approach
+            pyautogui.hotkey("alt", "tab")
+            time.sleep(0.3)
+            return "focused (fallback: alt+tab)"
+        except Exception as exc:
+            return f"activate failed: {exc}"
+
+    def get_open_windows(self) -> list[str]:
+        """Return titles of all visible windows (excluding blank ones)."""
+        try:
+            import pygetwindow as gw
+            return [w.title for w in gw.getAllWindows() if w.title.strip()]
+        except Exception:
+            return []
