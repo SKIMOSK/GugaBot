@@ -106,11 +106,15 @@ class SettingsDialog(QDialog):
         lay.addWidget(self._vasilas_orch)
 
         lay.addWidget(self._lbl("Vasilaș AI — expert  (consulted for best methods)"))
-        self._vasilas_expert = self._combo([
-            "anthropic/claude-opus-4-6",
-            "google/gemini-2.5-pro",
-            "openai/gpt-4o",
-        ], self.config.get("vasilas_expert_model", "anthropic/claude-opus-4-6"))
+        _EXPERT_OPTIONS = [
+            ("anthropic/claude-opus-4-6",  "Claude Opus 4.6  —  Vasilaș in a good day"),
+            ("google/gemini-2.5-pro",       "Gemini 3 Pro  —  Vasilaș in a Google way"),
+            ("anthropic/claude-sonnet-4-6", "Claude Sonnet 4.6  —  Vasilaș in a cheaper day"),
+        ]
+        self._expert_options = _EXPERT_OPTIONS
+        _saved_expert = self.config.get("vasilas_expert_model", "anthropic/claude-opus-4-6")
+        _expert_display = next((d for i, d in _EXPERT_OPTIONS if i == _saved_expert), _EXPERT_OPTIONS[0][1])
+        self._vasilas_expert = self._combo([d for _, d in _EXPERT_OPTIONS], _expert_display)
         lay.addWidget(self._vasilas_expert)
 
         lay.addWidget(self._lbl("Vasilaș AI — executor  (carries out each step)"))
@@ -310,7 +314,8 @@ class SettingsDialog(QDialog):
         self.config.set("ancuta_model", self._ancuta_model.currentText())
         self.config.set("buftea_model", self._buftea_model.currentText())
         self.config.set("vasilas_orchestrator_model", self._vasilas_orch.currentText())
-        self.config.set("vasilas_expert_model",       self._vasilas_expert.currentText())
+        _expert_id = next((i for i, d in self._expert_options if d == self._vasilas_expert.currentText()), self._expert_options[0][0])
+        self.config.set("vasilas_expert_model", _expert_id)
         self.config.set("vasilas_executor_model",     self._vasilas_exec.currentText())
         _tok_text = self._max_req.currentText()
         self.config.set("buftea_max_tokens_per_request", 0 if _tok_text == "None (minimal)" else int(_tok_text))

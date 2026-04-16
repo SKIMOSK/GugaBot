@@ -35,8 +35,20 @@ Output ONLY valid JSON, one of two forms:
 Consult expert:  {"consult": "<specific question>"}
 Finalize plan:   {"plan": [{"step": 1, "description": "<what to do>", "hint": "<method/approach>"}, ...]}
 
-Rules:
-- Use consult for creative content, best methods, or expert judgment.
+CONSULT EXPERT FOR:
+- Complex creative writing, storytelling, persuasive text
+- Coding tasks requiring significant logic or architecture decisions
+- Math, physics, chemistry, scientific reasoning
+- Image analysis or interpretation requiring deep understanding
+- Any question where a significantly better answer truly matters
+
+DO NOT CONSULT EXPERT FOR:
+- Terminal commands to open or control apps (you know these)
+- Keyboard shortcuts and hotkeys
+- Basic automation steps (screenshot, click, type, open app)
+- Simple procedural tasks with obvious solutions
+Answer these yourself and go directly to producing the plan.
+
 - Maximum 4 consultations before producing the plan.
 - Each plan step is self-contained and executed by a vision AI that sees the screen.
 - Steps must be concrete: which app, what action, what input."""
