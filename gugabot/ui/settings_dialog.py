@@ -95,6 +95,32 @@ class SettingsDialog(QDialog):
         ], self.config.get("buftea_model", "google/gemini-2.5-pro"))
         lay.addWidget(self._buftea_model)
 
+        lay.addWidget(self._divider())
+
+        lay.addWidget(self._lbl("Vasilaș AI — orchestrator  (plans using expert input)"))
+        self._vasilas_orch = self._combo([
+            "deepseek/deepseek-r1",
+            "deepseek/deepseek-chat",
+            "google/gemini-1.5-pro",
+        ], self.config.get("vasilas_orchestrator_model", "deepseek/deepseek-r1"))
+        lay.addWidget(self._vasilas_orch)
+
+        lay.addWidget(self._lbl("Vasilaș AI — expert  (consulted for best methods)"))
+        self._vasilas_expert = self._combo([
+            "anthropic/claude-opus-4-6",
+            "google/gemini-2.5-pro",
+            "openai/gpt-4o",
+        ], self.config.get("vasilas_expert_model", "anthropic/claude-opus-4-6"))
+        lay.addWidget(self._vasilas_expert)
+
+        lay.addWidget(self._lbl("Vasilaș AI — executor  (carries out each step)"))
+        self._vasilas_exec = self._combo([
+            "google/gemini-2.5-flash",
+            "google/gemini-2.0-flash-001",
+            "google/gemini-1.5-flash",
+        ], self.config.get("vasilas_executor_model", "google/gemini-2.5-flash"))
+        lay.addWidget(self._vasilas_exec)
+
         lay.addStretch()
         return tab
 
@@ -197,8 +223,9 @@ class SettingsDialog(QDialog):
         tab, lay = self._make_tab()
 
         usage = self.config.get("usage", {})
-        lay.addWidget(self._usage_card("Ancuța AI", usage.get("ancuta", {})))
-        lay.addWidget(self._usage_card("Buftea AI", usage.get("buftea", {})))
+        lay.addWidget(self._usage_card("Ancuța AI",  usage.get("ancuta",  {})))
+        lay.addWidget(self._usage_card("Buftea AI",  usage.get("buftea",  {})))
+        lay.addWidget(self._usage_card("Vasilaș AI", usage.get("vasilas", {})))
 
         reset_btn = QPushButton("Reset all usage statistics")
         reset_btn.setObjectName("stop_btn")
@@ -282,6 +309,9 @@ class SettingsDialog(QDialog):
         self.config.set("api_key", self._api_key.text().strip())
         self.config.set("ancuta_model", self._ancuta_model.currentText())
         self.config.set("buftea_model", self._buftea_model.currentText())
+        self.config.set("vasilas_orchestrator_model", self._vasilas_orch.currentText())
+        self.config.set("vasilas_expert_model",       self._vasilas_expert.currentText())
+        self.config.set("vasilas_executor_model",     self._vasilas_exec.currentText())
         _tok_text = self._max_req.currentText()
         self.config.set("buftea_max_tokens_per_request", 0 if _tok_text == "None (minimal)" else int(_tok_text))
         self.config.set("buftea_max_tokens_per_session", self._max_session.value())

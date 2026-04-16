@@ -6,19 +6,22 @@ from pathlib import Path
 class Config:
     DEFAULT_SETTINGS = {
         "api_key": "",
-        "ancuta_model": "google/gemini-flash-1.5",
+        "ancuta_model": "google/gemini-1.5-flash",
         "buftea_model": "google/gemini-2.5-pro",
+        "vasilas_orchestrator_model": "deepseek/deepseek-r1",
+        "vasilas_expert_model": "anthropic/claude-opus-4-6",
+        "vasilas_executor_model": "google/gemini-2.5-flash",
         "screenshot_interval": 10,
         "voice_enabled": True,
         "theme": "dark",
-        # Buftea safety / token limits
-        "buftea_max_tokens_per_request": 1024,
-        "buftea_max_tokens_per_session": 0,   # 0 = unlimited
+        "buftea_max_tokens_per_request": 0,
+        "buftea_max_tokens_per_session": 0,
         "buftea_allow_dangerous_no_ask": False,
         "sounds_enabled": True,
         "usage": {
-            "ancuta": {"tokens_in": 0, "tokens_out": 0, "requests": 0},
-            "buftea": {"tokens_in": 0, "tokens_out": 0, "requests": 0},
+            "ancuta":  {"tokens_in": 0, "tokens_out": 0, "requests": 0},
+            "buftea":  {"tokens_in": 0, "tokens_out": 0, "requests": 0},
+            "vasilas": {"tokens_in": 0, "tokens_out": 0, "requests": 0},
         },
     }
 
@@ -74,7 +77,8 @@ class Config:
 
     def reset_usage(self):
         self.settings["usage"] = {
-            "ancuta": {"tokens_in": 0, "tokens_out": 0, "requests": 0},
-            "buftea": {"tokens_in": 0, "tokens_out": 0, "requests": 0},
+            "ancuta":  {"tokens_in": 0, "tokens_out": 0, "requests": 0},
+            "buftea":  {"tokens_in": 0, "tokens_out": 0, "requests": 0},
+            "vasilas": {"tokens_in": 0, "tokens_out": 0, "requests": 0},
         }
         self.save()

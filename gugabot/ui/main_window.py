@@ -1,5 +1,3 @@
-import threading
-
 from PyQt6.QtCore import Qt, QTimer, pyqtSlot
 from PyQt6.QtWidgets import (
     QFrame,
@@ -17,6 +15,7 @@ from PyQt6.QtWidgets import (
 
 from gugabot.ai.ancuta import AncutaAI
 from gugabot.ai.buftea import BufteaAI
+from gugabot.ai.vasilas import VasilasAI
 from gugabot.config import Config
 from gugabot.logger import ActivityLogger
 from gugabot.sounds import SoundManager
@@ -25,7 +24,6 @@ from gugabot.ui.settings_dialog import SettingsDialog
 from gugabot.ui.styles import STYLESHEET
 from gugabot.voice import VoiceListener
 
-# Log-level → HTML colour
 LOG_COLORS = {
     "info":     "#6aaa88",
     "action":   "#00ff88",
@@ -43,15 +41,17 @@ class MainWindow(QMainWindow):
         logger: ActivityLogger,
         ancuta: AncutaAI,
         buftea: BufteaAI,
+        vasilas: VasilasAI,
         voice: VoiceListener,
     ):
         super().__init__()
-        self.config = config
-        self.logger = logger
-        self.ancuta = ancuta
-        self.buftea = buftea
-        self.voice = voice
-        self.sounds = SoundManager()
+        self.config  = config
+        self.logger  = logger
+        self.ancuta  = ancuta
+        self.buftea  = buftea
+        self.vasilas = vasilas
+        self.voice   = voice
+        self.sounds  = SoundManager()
         self.sounds.enabled = config.get("sounds_enabled", True)
 
         self.setWindowTitle("GugaBot")
@@ -59,25 +59,24 @@ class MainWindow(QMainWindow):
         self.resize(1140, 720)
         self.setStyleSheet(STYLESHEET)
 
-        # Confirm banner widget (created lazily, inserted into log panel)
         self._confirm_banner: QFrame | None = None
         self._confirm_timer: QTimer | None = None
         self._confirm_countdown = 0
-
+        self._confirm_requester = "buftea"
         self._mini: MiniWindow | None = None
 
         self._build_ui()
         self._connect_signals()
         self._post_init()
 
-    # ═══════════════════════════════════════════════ UI build
+    # ═══════════════════════════ UI build ═══════════════════════════════
+
     def _build_ui(self):
         root = QWidget()
         self.setCentralWidget(root)
         vbox = QVBoxLayout(root)
         vbox.setContentsMargins(0, 0, 0, 0)
         vbox.setSpacing(0)
-
         vbox.addWidget(self._header())
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -89,10 +88,10 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         vbox.addWidget(splitter, 1)
-
         vbox.addWidget(self._bottom_bar())
 
-    # ── Header ────────────────────────────────────────────────────────
+    # ── Header ──────────────────────────────────────────────────────────
+
     def _header(self) -> QFrame:
         hdr = QFrame()
         hdr.setObjectName("header")
@@ -109,7 +108,6 @@ class MainWindow(QMainWindow):
         version.setObjectName("status_text")
         version.setStyleSheet("color: #2e6045; font-size: 11px; margin-left: 4px;")
         lay.addWidget(version)
-
         lay.addStretch()
 
         self._dot = QLabel("●")
@@ -119,13 +117,12 @@ class MainWindow(QMainWindow):
         self._status_lbl = QLabel("Idle")
         self._status_lbl.setObjectName("status_text")
         lay.addWidget(self._status_lbl)
-
         lay.addSpacing(14)
 
         mini_btn = QPushButton("⊟")
         mini_btn.setObjectName("icon_btn")
         mini_btn.setFixedSize(36, 36)
-        mini_btn.setToolTip("Collapse to mini overlay  (top-right corner, always on top)")
+        mini_btn.setToolTip("Collapse to mini overlay")
         mini_btn.clicked.connect(self._go_mini)
         lay.addWidget(mini_btn)
 
@@ -138,29 +135,49 @@ class MainWindow(QMainWindow):
 
         return hdr
 
-    # ── Left panel ────────────────────────────────────────────────────
+    # ── Left panel (3 AI tabs) ───────────────────────────────────────────
+
     def _left_panel(self) -> QWidget:
         panel = QFrame()
         panel.setObjectName("panel")
         panel.setMinimumWidth(250)
         panel.setMaximumWidth(340)
-        lay = QVBoxLayout(panel)
-        lay.setContentsMargins(16, 16, 16, 16)
-        lay.setSpacing(10)
+        outer = QVBoxLayout(panel)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
 
-        # ── Ancuța ──────────────────────────────
-        a_title = QLabel("Ancuța AI")
-        a_title.setObjectName("section_title")
-        lay.addWidget(a_title)
+        tabs = QTabWidget()
+        tabs.setObjectName("ai_tabs")
+        tabs.addTab(self._ancuta_tab(), "Ancuța")
+        tabs.addTab(self._buftea_tab(), "Buftea")
+        tabs.addTab(self._vasilas_tab(), "Vasilaș")
+        outer.addWidget(tabs, 1)
 
-        a_desc = QLabel("Quick tasks · Gemini 1.5 Flash\nWake word: \"GugaBot\"")
-        a_desc.setObjectName("section_desc")
-        a_desc.setWordWrap(True)
-        lay.addWidget(a_desc)
+        voice_strip = QWidget()
+        vl = QVBoxLayout(voice_strip)
+        vl.setContentsMargins(16, 4, 16, 10)
+        lbl_text = "🎤  Voice active" if self.voice.available else "🎤  Voice unavailable  (install pyaudio)"
+        self._voice_lbl = QLabel(lbl_text)
+        self._voice_lbl.setObjectName("voice_indicator")
+        self._voice_lbl.setWordWrap(True)
+        vl.addWidget(self._voice_lbl)
+        outer.addWidget(voice_strip)
 
-        self._ancuta_status = QLabel(
-            "● Listening" if self.voice.available else "● Ready"
-        )
+        return panel
+
+    def _ancuta_tab(self) -> QWidget:
+        tab = QWidget()
+        lay = QVBoxLayout(tab)
+        lay.setContentsMargins(14, 12, 14, 12)
+        lay.setSpacing(8)
+
+        lay.addWidget(self._sec_title("Ancuța AI"))
+        desc = QLabel("Quick tasks · Gemini 1.5 Flash\nWake word: \"GugaBot\"")
+        desc.setObjectName("section_desc")
+        desc.setWordWrap(True)
+        lay.addWidget(desc)
+
+        self._ancuta_status = QLabel("● Listening" if self.voice.available else "● Ready")
         self._ancuta_status.setObjectName("ai_status_active")
         lay.addWidget(self._ancuta_status)
 
@@ -175,39 +192,38 @@ class MainWindow(QMainWindow):
         send_btn = QPushButton("→")
         send_btn.setObjectName("send_btn")
         send_btn.setFixedWidth(32)
-        send_btn.setToolTip("Send to Ancuța AI")
         send_btn.clicked.connect(self._send_ancuta)
         row.addWidget(send_btn)
         lay.addLayout(row)
 
-        lay.addWidget(self._divider())
+        lay.addStretch()
+        return tab
 
-        # ── Buftea ──────────────────────────────
-        b_title = QLabel("Buftea AI")
-        b_title.setObjectName("section_title")
-        lay.addWidget(b_title)
+    def _buftea_tab(self) -> QWidget:
+        tab = QWidget()
+        lay = QVBoxLayout(tab)
+        lay.setContentsMargins(14, 12, 14, 12)
+        lay.setSpacing(8)
 
-        b_desc = QLabel("Full PC control · Gemini 2.5 Pro\nSees your screen")
-        b_desc.setObjectName("section_desc")
-        b_desc.setWordWrap(True)
-        lay.addWidget(b_desc)
+        lay.addWidget(self._sec_title("Buftea AI"))
+        desc = QLabel("Full PC control · Gemini 2.5 Pro\nSees your screen")
+        desc.setObjectName("section_desc")
+        desc.setWordWrap(True)
+        lay.addWidget(desc)
 
         self._buftea_status = QLabel("● Idle")
         self._buftea_status.setObjectName("ai_status_idle")
         self._buftea_status.setStyleSheet("color: #3a6050; font-size: 12px; font-weight: 600;")
         lay.addWidget(self._buftea_status)
 
-        # Session token usage mini-bar
         self._session_lbl = QLabel("Session tokens: —")
         self._session_lbl.setObjectName("section_desc")
         lay.addWidget(self._session_lbl)
 
         self._buftea_input = QTextEdit()
         self._buftea_input.setObjectName("prompt_input")
-        self._buftea_input.setPlaceholderText(
-            "Describe a task for Buftea AI…\ne.g. Open Chrome and search for cats"
-        )
-        self._buftea_input.setFixedHeight(88)
+        self._buftea_input.setPlaceholderText("Describe a task for Buftea AI…\ne.g. Open Chrome and search for cats")
+        self._buftea_input.setFixedHeight(80)
         lay.addWidget(self._buftea_input)
 
         self._start_btn = QPushButton("▶  Start Buftea AI")
@@ -223,18 +239,51 @@ class MainWindow(QMainWindow):
         lay.addWidget(self._stop_btn)
 
         lay.addStretch()
+        return tab
 
-        if self.voice.available:
-            self._voice_lbl = QLabel("🎤  Voice active")
-        else:
-            self._voice_lbl = QLabel("🎤  Voice unavailable\n    (install pyaudio)")
-        self._voice_lbl.setObjectName("voice_indicator")
-        self._voice_lbl.setWordWrap(True)
-        lay.addWidget(self._voice_lbl)
+    def _vasilas_tab(self) -> QWidget:
+        tab = QWidget()
+        lay = QVBoxLayout(tab)
+        lay.setContentsMargins(14, 12, 14, 12)
+        lay.setSpacing(8)
 
-        return panel
+        lay.addWidget(self._sec_title("Vasilaș AI"))
+        desc = QLabel("Orchestrated pipeline\nPlans with expert AI · Executes with Flash")
+        desc.setObjectName("section_desc")
+        desc.setWordWrap(True)
+        lay.addWidget(desc)
 
-    # ── Right panel (tabs: Activity Log + AI Logs) ────────────────────
+        self._vasilas_status = QLabel("● Idle")
+        self._vasilas_status.setObjectName("ai_status_idle")
+        self._vasilas_status.setStyleSheet("color: #3a6050; font-size: 12px; font-weight: 600;")
+        lay.addWidget(self._vasilas_status)
+
+        self._vasilas_session_lbl = QLabel("Session tokens: —")
+        self._vasilas_session_lbl.setObjectName("section_desc")
+        lay.addWidget(self._vasilas_session_lbl)
+
+        self._vasilas_input = QTextEdit()
+        self._vasilas_input.setObjectName("prompt_input")
+        self._vasilas_input.setPlaceholderText("Complex task for Vasilaș AI…\nIt will plan, consult experts, then execute")
+        self._vasilas_input.setFixedHeight(80)
+        lay.addWidget(self._vasilas_input)
+
+        self._vasilas_start_btn = QPushButton("▶  Start Vasilaș AI")
+        self._vasilas_start_btn.setObjectName("primary_btn")
+        self._vasilas_start_btn.clicked.connect(self._start_vasilas)
+        lay.addWidget(self._vasilas_start_btn)
+
+        self._vasilas_stop_btn = QPushButton("■  Stop")
+        self._vasilas_stop_btn.setObjectName("stop_btn")
+        self._vasilas_stop_btn.setEnabled(False)
+        self._vasilas_stop_btn.clicked.connect(self._stop_all)
+        lay.addWidget(self._vasilas_stop_btn)
+
+        lay.addStretch()
+        return tab
+
+    # ── Right panel ──────────────────────────────────────────────────────
+
     def _right_panel(self) -> QWidget:
         self._right_frame = QFrame()
         self._right_frame.setObjectName("panel")
@@ -242,7 +291,6 @@ class MainWindow(QMainWindow):
         lay.setContentsMargins(16, 14, 16, 14)
         lay.setSpacing(8)
 
-        # Confirm banner slot — above tabs so it's always visible
         self._banner_slot = QWidget()
         self._banner_slot.setVisible(False)
         self._banner_slot_layout = QVBoxLayout(self._banner_slot)
@@ -252,12 +300,10 @@ class MainWindow(QMainWindow):
         tabs = QTabWidget()
         tabs.setObjectName("log_tabs")
 
-        # ── Tab 0: Activity ──────────────────────────────────────────
         activity_w = QWidget()
         act_lay = QVBoxLayout(activity_w)
         act_lay.setContentsMargins(0, 8, 0, 0)
         act_lay.setSpacing(4)
-
         act_hdr = QHBoxLayout()
         act_hdr.addStretch()
         clear_btn = QPushButton("Clear")
@@ -265,20 +311,16 @@ class MainWindow(QMainWindow):
         clear_btn.clicked.connect(self._clear_log)
         act_hdr.addWidget(clear_btn)
         act_lay.addLayout(act_hdr)
-
         self._log = QTextEdit()
         self._log.setObjectName("log_display")
         self._log.setReadOnly(True)
         act_lay.addWidget(self._log, 1)
-
         tabs.addTab(activity_w, "Activity")
 
-        # ── Tab 1: AI Logs ───────────────────────────────────────────
         ai_w = QWidget()
         ai_lay = QVBoxLayout(ai_w)
         ai_lay.setContentsMargins(0, 8, 0, 0)
         ai_lay.setSpacing(4)
-
         ai_hdr = QHBoxLayout()
         ai_hdr.addStretch()
         ai_clear_btn = QPushButton("Clear")
@@ -286,38 +328,34 @@ class MainWindow(QMainWindow):
         ai_clear_btn.clicked.connect(self._clear_ai_log)
         ai_hdr.addWidget(ai_clear_btn)
         ai_lay.addLayout(ai_hdr)
-
         self._ai_log = QTextEdit()
         self._ai_log.setObjectName("log_display")
         self._ai_log.setReadOnly(True)
         ai_lay.addWidget(self._ai_log, 1)
-
         tabs.addTab(ai_w, "AI Logs")
 
         lay.addWidget(tabs, 1)
         return self._right_frame
 
-    # ── Bottom bar ───────────────────────────────────────────────────
+    # ── Bottom bar ───────────────────────────────────────────────────────
+
     def _bottom_bar(self) -> QFrame:
         bar = QFrame()
         bar.setObjectName("bottom_bar")
         bar.setFixedHeight(34)
         lay = QHBoxLayout(bar)
         lay.setContentsMargins(16, 0, 16, 0)
-
         self._model_lbl = QLabel(self._model_text())
         self._model_lbl.setObjectName("status_bar_text")
         lay.addWidget(self._model_lbl)
-
         lay.addStretch()
-
         self._token_lbl = QLabel(self._token_text())
         self._token_lbl.setObjectName("status_bar_text")
         lay.addWidget(self._token_lbl)
-
         return bar
 
-    # ── Helpers ──────────────────────────────────────────────────────
+    # ── Helpers ──────────────────────────────────────────────────────────
+
     def _divider(self) -> QFrame:
         d = QFrame()
         d.setObjectName("divider")
@@ -325,55 +363,54 @@ class MainWindow(QMainWindow):
         d.setFixedHeight(1)
         return d
 
+    def _sec_title(self, text: str) -> QLabel:
+        lbl = QLabel(text)
+        lbl.setObjectName("section_title")
+        return lbl
+
     def _model_text(self) -> str:
         a = self.config.get("ancuta_model", "—")
         b = self.config.get("buftea_model", "—")
         return f"Ancuța: {a}   |   Buftea: {b}"
 
     def _token_text(self) -> str:
-        usage = self.config.get("usage", {})
-        a = usage.get("ancuta", {})
-        b = usage.get("buftea", {})
-        ta = a.get("tokens_in", 0) + a.get("tokens_out", 0)
-        tb = b.get("tokens_in", 0) + b.get("tokens_out", 0)
-        return f"Ancuța: {ta:,} tok   |   Buftea: {tb:,} tok"
+        u = self.config.get("usage", {})
+        def _t(k): d = u.get(k, {}); return d.get("tokens_in", 0) + d.get("tokens_out", 0)
+        return f"A: {_t('ancuta'):,}  B: {_t('buftea'):,}  V: {_t('vasilas'):,} tok"
 
-    # ═══════════════════════════════════════════════ Signals
+    # ═══════════════════════════ Signals ════════════════════════════════
+
     def _connect_signals(self):
         self.logger.log_added.connect(self._on_log)
         self.buftea.status_changed.connect(self._on_buftea_status)
-        self.buftea.confirmation_needed.connect(self._on_confirmation_needed)
-
+        self.buftea.confirmation_needed.connect(self._on_buftea_confirmation_needed)
+        self.vasilas.status_changed.connect(self._on_vasilas_status)
+        self.vasilas.phase_changed.connect(self._on_vasilas_phase)
+        self.vasilas.confirmation_needed.connect(self._on_vasilas_confirmation_needed)
         if self.voice.available:
             self.voice.wake_word_detected.connect(self._on_wake_word)
             self.voice.command_detected.connect(self._on_voice_command)
             self.voice.status_changed.connect(self._on_voice_status)
 
-    # ═══════════════════════════════════════════════ Slots
+    # ═══════════════════════════ Slots ══════════════════════════════════
+
     @pyqtSlot(str, str, str)
     def _on_log(self, ts: str, level: str, msg: str):
-        # Raw AI responses go to the AI Logs tab only
         if level == "ai_raw":
-            ts_html = f'<span style="color:#2e6045">[{ts}]</span>'
+            ts_html  = f'<span style="color:#2e6045">[{ts}]</span>'
             msg_html = f'<pre style="color:#8ac4a8;margin:0">{_escape_html(msg)}</pre>'
             self._ai_log.append(f"{ts_html} {msg_html}<br>")
             self._ai_log.verticalScrollBar().setValue(self._ai_log.verticalScrollBar().maximum())
             return
-
-        color = LOG_COLORS.get(level, "#6aaa88")
-        ts_html = f'<span style="color:#2e6045">[{ts}]</span>'
+        color    = LOG_COLORS.get(level, "#6aaa88")
+        ts_html  = f'<span style="color:#2e6045">[{ts}]</span>'
         msg_html = f'<span style="color:{color}">{_escape_html(msg)}</span>'
         self._log.append(f"{ts_html} {msg_html}")
         self._log.verticalScrollBar().setValue(self._log.verticalScrollBar().maximum())
         self._token_lbl.setText(self._token_text())
-
-        # Trigger sounds based on log level
-        if level == "error":
-            self.sounds.error()
-        elif level == "action":
-            self.sounds.action()
-        elif level == "wake":
-            self.sounds.wake()
+        if level == "error":    self.sounds.error()
+        elif level == "action": self.sounds.action()
+        elif level == "wake":   self.sounds.wake()
 
     @pyqtSlot(str)
     def _on_buftea_status(self, state: str):
@@ -390,9 +427,36 @@ class MainWindow(QMainWindow):
             self._stop_btn.setEnabled(False)
             self._set_status("Idle", "idle")
             self.sounds.done()
-            self._session_lbl.setText(
-                f"Session tokens: {self.buftea._session_tokens:,}"
-            )
+            self._session_lbl.setText(f"Session tokens: {self.buftea._session_tokens:,}")
+
+    @pyqtSlot(str)
+    def _on_vasilas_status(self, state: str):
+        if state == "running":
+            self._vasilas_start_btn.setEnabled(False)
+            self._vasilas_stop_btn.setEnabled(True)
+            self._set_status("Vasilaș Active", "active")
+        else:
+            self._vasilas_start_btn.setEnabled(True)
+            self._vasilas_stop_btn.setEnabled(False)
+            self._vasilas_status.setText("● Idle")
+            self._vasilas_status.setStyleSheet("color: #3a6050; font-size: 12px; font-weight: 600;")
+            self._set_status("Idle", "idle")
+            self.sounds.done()
+            self._vasilas_session_lbl.setText(f"Session tokens: {self.vasilas._session_tokens:,}")
+
+    @pyqtSlot(str)
+    def _on_vasilas_phase(self, phase: str):
+        if phase == "planning":
+            text, color = "● Planning…", "#ffaa00"
+        elif phase.startswith("executing"):
+            step = phase.split()[-1] if len(phase.split()) > 1 else ""
+            text, color = f"● Executing {step}", "#00e5cc"
+        elif phase == "idle":
+            return
+        else:
+            return
+        self._vasilas_status.setText(text)
+        self._vasilas_status.setStyleSheet(f"color: {color}; font-size: 12px; font-weight: 600;")
 
     @pyqtSlot(str)
     def _on_wake_word(self, word: str):
@@ -400,33 +464,37 @@ class MainWindow(QMainWindow):
             self._stop_all()
             self.logger.log("Stopped by voice command", "system")
         elif word == "gugabot":
-            self.logger.log("Wake word detected — listening for command…", "wake")
+            self.logger.log("Wake word detected — listening…", "wake")
             self._set_status("Listening…", "active")
 
     @pyqtSlot(str)
     def _on_voice_command(self, text: str):
         self.logger.log(f'Voice: "{text}"', "wake")
-        self._set_status("Processing", "active")
         self.ancuta.process_request(text)
 
     @pyqtSlot(str)
     def _on_voice_status(self, msg: str):
-        if msg:
-            self._set_status(msg, "active")
-        else:
-            self._set_status("Idle", "idle")
+        self._set_status(msg if msg else "Idle", "active" if msg else "idle")
 
-    # ═══════════════════════════════════════════════ Confirmation banner
+    # ═══════════════════════════ Confirmation ═══════════════════════════
+
     @pyqtSlot(str, str)
-    def _on_confirmation_needed(self, label: str, details: str):
+    def _on_buftea_confirmation_needed(self, label: str, details: str):
+        self._confirm_requester = "buftea"
+        self._show_confirmation(label, details)
+
+    @pyqtSlot(str, str)
+    def _on_vasilas_confirmation_needed(self, label: str, details: str):
+        self._confirm_requester = "vasilas"
+        self._show_confirmation(label, details)
+
+    def _show_confirmation(self, label: str, details: str):
         self.sounds.confirm()
         self.logger.log(f"⚠ Confirmation required: {label}", "error")
         self._show_confirm_banner(label, details)
 
     def _show_confirm_banner(self, label: str, details: str):
-        # Remove any existing banner
         self._hide_confirm_banner()
-
         banner = QFrame()
         banner.setObjectName("confirm_banner")
         bl = QVBoxLayout(banner)
@@ -438,7 +506,6 @@ class MainWindow(QMainWindow):
         title_lbl.setObjectName("confirm_banner_title")
         title_row.addWidget(title_lbl)
         title_row.addStretch()
-
         self._timer_lbl = QLabel("120s")
         self._timer_lbl.setObjectName("confirm_banner_timer")
         title_row.addWidget(self._timer_lbl)
@@ -451,12 +518,10 @@ class MainWindow(QMainWindow):
 
         btn_row = QHBoxLayout()
         btn_row.addStretch()
-
         deny_btn = QPushButton("✕  Deny")
         deny_btn.setObjectName("confirm_no_btn")
         deny_btn.clicked.connect(lambda: self._respond_confirm(False))
         btn_row.addWidget(deny_btn)
-
         allow_btn = QPushButton("✓  Allow")
         allow_btn.setObjectName("confirm_yes_btn")
         allow_btn.clicked.connect(lambda: self._respond_confirm(True))
@@ -467,7 +532,6 @@ class MainWindow(QMainWindow):
         self._banner_slot_layout.addWidget(banner)
         self._banner_slot.setVisible(True)
 
-        # Countdown timer (auto-deny at 0)
         self._confirm_countdown = 120
         self._confirm_timer = QTimer(self)
         self._confirm_timer.timeout.connect(self._tick_confirm)
@@ -485,9 +549,11 @@ class MainWindow(QMainWindow):
             self._confirm_timer.stop()
             self._confirm_timer = None
         self._hide_confirm_banner()
-        self.buftea.respond_confirmation(confirmed)
-        verb = "allowed" if confirmed else "denied"
-        self.logger.log(f"Dangerous action {verb}.", "system")
+        if self._confirm_requester == "vasilas":
+            self.vasilas.respond_confirmation(confirmed)
+        else:
+            self.buftea.respond_confirmation(confirmed)
+        self.logger.log(f"Dangerous action {'allowed' if confirmed else 'denied'}.", "system")
 
     def _hide_confirm_banner(self):
         if self._confirm_banner:
@@ -496,7 +562,8 @@ class MainWindow(QMainWindow):
             self._confirm_banner = None
         self._banner_slot.setVisible(False)
 
-    # ═══════════════════════════════════════════════ User actions
+    # ═══════════════════════════ User actions ════════════════════════════
+
     def _send_ancuta(self):
         text = self._ancuta_input.text().strip()
         if not text:
@@ -510,33 +577,46 @@ class MainWindow(QMainWindow):
         if not prompt:
             self.logger.log("Enter a task for Buftea AI first.", "error")
             return
-        pos = self.pos()
-        sz = self.size()
+        pos, sz = self.pos(), self.size()
         self.buftea.set_window_rect(pos.x(), pos.y(), sz.width(), sz.height())
         self._session_lbl.setText("Session tokens: 0")
         self.buftea.start_task(prompt)
 
+    def _start_vasilas(self):
+        prompt = self._vasilas_input.toPlainText().strip()
+        if not prompt:
+            self.logger.log("Enter a task for Vasilaș AI first.", "error")
+            return
+        pos, sz = self.pos(), self.size()
+        self.vasilas.set_window_rect(pos.x(), pos.y(), sz.width(), sz.height())
+        self._vasilas_session_lbl.setText("Session tokens: 0")
+        self.vasilas.start_task(prompt)
+
     def _stop_all(self):
         self.ancuta.stop()
         self.buftea.stop()
-        # If a confirm is pending, auto-deny it
+        self.vasilas.stop()
         if self._confirm_banner:
             self._respond_confirm(False)
-        self._stop_btn.setEnabled(False)
-        self._start_btn.setEnabled(True)
-        self._buftea_status.setText("● Idle")
-        self._buftea_status.setStyleSheet("color: #3a6050; font-size: 12px; font-weight: 600;")
+        for btn, enabled in [
+            (self._stop_btn, False), (self._start_btn, True),
+            (self._vasilas_stop_btn, False), (self._vasilas_start_btn, True),
+        ]:
+            btn.setEnabled(enabled)
+        for lbl in (self._buftea_status, self._vasilas_status):
+            lbl.setText("● Idle")
+            lbl.setStyleSheet("color: #3a6050; font-size: 12px; font-weight: 600;")
         self._set_status("Idle", "idle")
         self.sounds.stop()
         self.logger.log("All AI stopped.", "system")
 
     def _go_mini(self):
-        """Collapse main window; show the always-on-top mini overlay."""
         if self._mini is None:
             self._mini = MiniWindow(
                 main_window=self,
                 ancuta=self.ancuta,
                 buftea=self.buftea,
+                vasilas=self.vasilas,
                 logger=self.logger,
                 sounds=self.sounds,
             )
@@ -548,6 +628,7 @@ class MainWindow(QMainWindow):
         if dlg.exec():
             self.ancuta.update_client()
             self.buftea.update_client()
+            self.vasilas.update_client()
             self.sounds.enabled = self.config.get("sounds_enabled", True)
             self._model_lbl.setText(self._model_text())
             self._token_lbl.setText(self._token_text())
@@ -559,11 +640,9 @@ class MainWindow(QMainWindow):
     def _clear_ai_log(self):
         self._ai_log.clear()
 
-    # ═══════════════════════════════════════════════ Helpers
     def _set_status(self, text: str, state: str):
         self._status_lbl.setText(text)
-        colours = {"idle": "#3a6050", "active": "#00ff88", "error": "#ff3355"}
-        c = colours.get(state, "#3a6050")
+        c = {"idle": "#3a6050", "active": "#00ff88", "error": "#ff3355"}.get(state, "#3a6050")
         self._dot.setStyleSheet(f"color: {c}; font-size: 18px;")
 
     def _post_init(self):
@@ -572,17 +651,11 @@ class MainWindow(QMainWindow):
             self.logger.log("No API key set — open ⚙ Settings to configure.", "error")
         if self.voice.available:
             self.voice.start()
-            self.logger.log(
-                'Voice active — say "GugaBot" to wake Ancuța AI, "Guga stop" to halt.',
-                "system",
-            )
+            self.logger.log('Voice active — say "GugaBot" to wake, "Guga stop" to halt.', "system")
         else:
-            self.logger.log(
-                "Voice unavailable — install pyaudio for voice control.", "system"
-            )
+            self.logger.log("Voice unavailable — install pyaudio for voice control.", "system")
 
 
-# ── helpers ──────────────────────────────────────────────────────────────────
 def _escape_html(text: str) -> str:
     return (
         text.replace("&", "&amp;")

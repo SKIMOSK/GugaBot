@@ -19,6 +19,7 @@ from gugabot.logger import ActivityLogger
 from gugabot.voice import VoiceListener
 from gugabot.ai.ancuta import AncutaAI
 from gugabot.ai.buftea import BufteaAI
+from gugabot.ai.vasilas import VasilasAI
 from gugabot.ui.main_window import MainWindow
 
 
@@ -34,8 +35,9 @@ def main():
     voice = VoiceListener()
     ancuta = AncutaAI(config, logger)
     buftea = BufteaAI(config, logger)
+    vasilas = VasilasAI(config, logger)
 
-    window = MainWindow(config, logger, ancuta, buftea, voice)
+    window = MainWindow(config, logger, ancuta, buftea, vasilas, voice)
     window.show()
 
     sys.exit(app.exec())

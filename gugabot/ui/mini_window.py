@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
 
 from gugabot.ai.ancuta import AncutaAI
 from gugabot.ai.buftea import BufteaAI
+from gugabot.ai.vasilas import VasilasAI
 from gugabot.logger import ActivityLogger
 from gugabot.sounds import SoundManager
 
@@ -89,18 +90,22 @@ QWidget {
 class MiniWindow(QWidget):
     def __init__(
         self,
-        main_window,         # MainWindow — shown on "back"
+        main_window,
         ancuta: AncutaAI,
         buftea: BufteaAI,
+        vasilas: VasilasAI,
         logger: ActivityLogger,
         sounds: SoundManager,
     ):
         super().__init__()
-        self._main = main_window
-        self._ancuta = ancuta
-        self._buftea = buftea
-        self._logger = logger
-        self._sounds = sounds
+        self._main    = main_window
+        self._ancuta  = ancuta
+        self._buftea  = buftea
+        self._vasilas = vasilas
+        self._logger  = logger
+        self._sounds  = sounds
+        self._buftea_running  = False
+        self._vasilas_running = False
 
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
@@ -173,24 +178,49 @@ class MiniWindow(QWidget):
     def _connect_signals(self):
         self._logger.log_added.connect(self._on_log)
         self._buftea.status_changed.connect(self._on_buftea_status)
+        self._vasilas.status_changed.connect(self._on_vasilas_status)
+        self._vasilas.phase_changed.connect(self._on_vasilas_phase)
 
     @pyqtSlot(str, str, str)
     def _on_log(self, _ts: str, level: str, msg: str):
         if level in ("action", "wake", "response"):
-            # Trim to fit the narrow label
             short = msg if len(msg) <= 60 else msg[:57] + "…"
             self._action_lbl.setText(short)
 
     @pyqtSlot(str)
     def _on_buftea_status(self, state: str):
+        self._buftea_running = (state == "running")
         if state == "running":
             self._dot.setStyleSheet("color: #00ff88; font-size: 14px;")
             self._status_lbl.setText("Buftea Active")
             self._stop_btn.setEnabled(True)
-        else:
+        elif not self._vasilas_running:
             self._dot.setStyleSheet("color: #3a6050; font-size: 14px;")
             self._status_lbl.setText("Idle")
             self._stop_btn.setEnabled(False)
+
+    @pyqtSlot(str)
+    def _on_vasilas_status(self, state: str):
+        self._vasilas_running = (state == "running")
+        if state == "running" and not self._buftea_running:
+            self._dot.setStyleSheet("color: #00e5cc; font-size: 14px;")
+            self._status_lbl.setText("Vasilaș Active")
+            self._stop_btn.setEnabled(True)
+        elif state == "idle" and not self._buftea_running:
+            self._dot.setStyleSheet("color: #3a6050; font-size: 14px;")
+            self._status_lbl.setText("Idle")
+            self._stop_btn.setEnabled(False)
+
+    @pyqtSlot(str)
+    def _on_vasilas_phase(self, phase: str):
+        if self._buftea_running or phase == "idle":
+            return
+        if phase == "planning":
+            self._dot.setStyleSheet("color: #ffaa00; font-size: 14px;")
+            self._status_lbl.setText("Planning…")
+        elif phase.startswith("executing"):
+            step = phase.split()[-1] if len(phase.split()) > 1 else ""
+            self._status_lbl.setText(f"Executing {step}")
 
     # ── Actions ─────────────────────────────────────────────────────────
     def _go_back(self):
@@ -202,6 +232,7 @@ class MiniWindow(QWidget):
     def _stop_all(self):
         self._ancuta.stop()
         self._buftea.stop()
+        self._vasilas.stop()
         self._sounds.stop()
         self._stop_btn.setEnabled(False)
         self._logger.log("All AI stopped (mini).", "system")
