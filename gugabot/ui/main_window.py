@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QPushButton,
     QSplitter,
+    QTabWidget,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -233,7 +234,7 @@ class MainWindow(QMainWindow):
 
         return panel
 
-    # ── Right panel (log + confirm banner) ───────────────────────────
+    # ── Right panel (tabs: Activity Log + AI Logs) ────────────────────
     def _right_panel(self) -> QWidget:
         self._right_frame = QFrame()
         self._right_frame.setObjectName("panel")
@@ -241,31 +242,59 @@ class MainWindow(QMainWindow):
         lay.setContentsMargins(16, 14, 16, 14)
         lay.setSpacing(8)
 
-        # Header row
-        hdr = QHBoxLayout()
-        log_lbl = QLabel("Activity Log")
-        log_lbl.setObjectName("section_title")
-        hdr.addWidget(log_lbl)
-        hdr.addStretch()
-
-        clear_btn = QPushButton("Clear")
-        clear_btn.setObjectName("text_btn")
-        clear_btn.clicked.connect(self._clear_log)
-        hdr.addWidget(clear_btn)
-        lay.addLayout(hdr)
-
-        # Placeholder widget for confirm banner — inserted above log
+        # Confirm banner slot — above tabs so it's always visible
         self._banner_slot = QWidget()
         self._banner_slot.setVisible(False)
         self._banner_slot_layout = QVBoxLayout(self._banner_slot)
         self._banner_slot_layout.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(self._banner_slot)
 
+        tabs = QTabWidget()
+        tabs.setObjectName("log_tabs")
+
+        # ── Tab 0: Activity ──────────────────────────────────────────
+        activity_w = QWidget()
+        act_lay = QVBoxLayout(activity_w)
+        act_lay.setContentsMargins(0, 8, 0, 0)
+        act_lay.setSpacing(4)
+
+        act_hdr = QHBoxLayout()
+        act_hdr.addStretch()
+        clear_btn = QPushButton("Clear")
+        clear_btn.setObjectName("text_btn")
+        clear_btn.clicked.connect(self._clear_log)
+        act_hdr.addWidget(clear_btn)
+        act_lay.addLayout(act_hdr)
+
         self._log = QTextEdit()
         self._log.setObjectName("log_display")
         self._log.setReadOnly(True)
-        lay.addWidget(self._log, 1)
+        act_lay.addWidget(self._log, 1)
 
+        tabs.addTab(activity_w, "Activity")
+
+        # ── Tab 1: AI Logs ───────────────────────────────────────────
+        ai_w = QWidget()
+        ai_lay = QVBoxLayout(ai_w)
+        ai_lay.setContentsMargins(0, 8, 0, 0)
+        ai_lay.setSpacing(4)
+
+        ai_hdr = QHBoxLayout()
+        ai_hdr.addStretch()
+        ai_clear_btn = QPushButton("Clear")
+        ai_clear_btn.setObjectName("text_btn")
+        ai_clear_btn.clicked.connect(self._clear_ai_log)
+        ai_hdr.addWidget(ai_clear_btn)
+        ai_lay.addLayout(ai_hdr)
+
+        self._ai_log = QTextEdit()
+        self._ai_log.setObjectName("log_display")
+        self._ai_log.setReadOnly(True)
+        ai_lay.addWidget(self._ai_log, 1)
+
+        tabs.addTab(ai_w, "AI Logs")
+
+        lay.addWidget(tabs, 1)
         return self._right_frame
 
     # ── Bottom bar ───────────────────────────────────────────────────
@@ -323,6 +352,14 @@ class MainWindow(QMainWindow):
     # ═══════════════════════════════════════════════ Slots
     @pyqtSlot(str, str, str)
     def _on_log(self, ts: str, level: str, msg: str):
+        # Raw AI responses go to the AI Logs tab only
+        if level == "ai_raw":
+            ts_html = f'<span style="color:#2e6045">[{ts}]</span>'
+            msg_html = f'<pre style="color:#8ac4a8;margin:0">{_escape_html(msg)}</pre>'
+            self._ai_log.append(f"{ts_html} {msg_html}<br>")
+            self._ai_log.verticalScrollBar().setValue(self._ai_log.verticalScrollBar().maximum())
+            return
+
         color = LOG_COLORS.get(level, "#6aaa88")
         ts_html = f'<span style="color:#2e6045">[{ts}]</span>'
         msg_html = f'<span style="color:{color}">{_escape_html(msg)}</span>'
@@ -518,6 +555,9 @@ class MainWindow(QMainWindow):
     def _clear_log(self):
         self._log.clear()
         self.logger.clear()
+
+    def _clear_ai_log(self):
+        self._ai_log.clear()
 
     # ═══════════════════════════════════════════════ Helpers
     def _set_status(self, text: str, state: str):

@@ -68,7 +68,7 @@ class AncutaAI(BaseAI):
     # ------------------------------------------------------------------
     def _run(self, user_request: str):
         self.logger.log(f"Ancuța AI: {user_request}", "wake")
-        model = self.config.get("ancuta_model", "google/gemini-flash-1.5")
+        model = self.config.get("ancuta_model", "google/gemini-1.5-flash")
 
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -93,6 +93,7 @@ class AncutaAI(BaseAI):
 
             self._record_usage("ancuta", resp.usage)
             raw = resp.choices[0].message.content or ""
+            self.logger.log(raw, "ai_raw")
             action = self._parse_action(raw)
 
             desc = action.get("description") or action.get("action", "?")
@@ -178,7 +179,7 @@ class AncutaAI(BaseAI):
 
         try:
             screenshot_b64 = self.pc.take_screenshot_base64()
-            model = self.config.get("ancuta_model", "google/gemini-flash-1.5")
+            model = self.config.get("ancuta_model", "google/gemini-1.5-flash")
             resp = self._client.chat.completions.create(
                 model=model,
                 messages=[

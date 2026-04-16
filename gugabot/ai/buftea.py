@@ -216,7 +216,7 @@ class BufteaAI(QObject):
         self.logger.log(f"Buftea AI starting: {user_request}", "wake")
         model = self.config.get("buftea_model", "google/gemini-2.5-pro")
         interval = float(self.config.get("screenshot_interval", 10))
-        max_req_tokens = int(self.config.get("buftea_max_tokens_per_request", 1024))
+        max_req_tokens = int(self.config.get("buftea_max_tokens_per_request", 0))
         max_session_tokens = int(self.config.get("buftea_max_tokens_per_session", 0))
 
         # Take initial screenshot and update scale factors first
@@ -253,12 +253,14 @@ class BufteaAI(QObject):
                 break
 
             try:
-                resp = self._client.chat.completions.create(
+                call_kwargs: dict = dict(
                     model=model,
                     messages=messages,
-                    max_tokens=max_req_tokens,
                     temperature=0.1,
                 )
+                if max_req_tokens > 0:
+                    call_kwargs["max_tokens"] = max_req_tokens
+                resp = self._client.chat.completions.create(**call_kwargs)
             except Exception as exc:
                 self.logger.log(f"API error: {exc}", "error")
                 break
@@ -270,6 +272,7 @@ class BufteaAI(QObject):
             self._record_usage("buftea", used)
 
             raw = resp.choices[0].message.content or ""
+            self.logger.log(raw, "ai_raw")
             action = self._parse_action(raw)
 
             desc = action.get("description") or action.get("action", "?")

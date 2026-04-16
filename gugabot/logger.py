@@ -5,7 +5,7 @@ from PyQt6.QtCore import QObject, pyqtSignal
 class ActivityLogger(QObject):
     log_added = pyqtSignal(str, str, str)  # timestamp, level, message
 
-    LEVELS = {"info", "action", "response", "error", "wake", "system"}
+    LEVELS = {"info", "action", "response", "error", "wake", "system", "ai_raw"}
 
     def __init__(self):
         super().__init__()

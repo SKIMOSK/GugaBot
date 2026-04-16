@@ -77,18 +77,18 @@ class SettingsDialog(QDialog):
 
         lay.addWidget(self._lbl("Ancuța AI model  (quick tasks, no screen)"))
         self._ancuta_model = self._combo([
-            "google/gemini-flash-1.5",
-            "google/gemini-flash-1.5-8b",
+            "google/gemini-1.5-flash",
+            "google/gemini-1.5-flash-8b",
             "google/gemini-2.0-flash-001",
             "openai/gpt-4o-mini",
             "anthropic/claude-3-haiku",
-        ], self.config.get("ancuta_model", "google/gemini-flash-1.5"))
+        ], self.config.get("ancuta_model", "google/gemini-1.5-flash"))
         lay.addWidget(self._ancuta_model)
 
         lay.addWidget(self._lbl("Buftea AI model  (full PC control, screen-aware)"))
         self._buftea_model = self._combo([
             "google/gemini-2.5-pro",
-            "google/gemini-pro-1.5",
+            "google/gemini-1.5-pro",
             "anthropic/claude-3.5-sonnet",
             "openai/gpt-4o",
             "openai/gpt-4-turbo",
@@ -104,9 +104,11 @@ class SettingsDialog(QDialog):
 
         # Max tokens per request
         lay.addWidget(self._lbl("Buftea AI — max tokens per request"))
+        _cur_tok = self.config.get("buftea_max_tokens_per_request", 0)
+        _cur_tok_text = "None (minimal)" if _cur_tok == 0 else str(_cur_tok)
         self._max_req = self._combo(
-            ["256", "512", "1024", "2048", "4096", "8192"],
-            str(self.config.get("buftea_max_tokens_per_request", 1024)),
+            ["None (minimal)", "256", "512", "1024", "2048", "4096", "8192"],
+            _cur_tok_text,
         )
         lay.addWidget(self._max_req)
 
@@ -166,8 +168,8 @@ class SettingsDialog(QDialog):
 
         lay.addWidget(self._lbl("Buftea AI — screenshot interval"))
         self._interval = self._combo(
-            ["5 seconds", "10 seconds", "30 seconds", "1 minute"],
-            {5: "5 seconds", 10: "10 seconds", 30: "30 seconds", 60: "1 minute"}.get(
+            ["3 seconds", "5 seconds", "10 seconds", "30 seconds", "1 minute"],
+            {3: "3 seconds", 5: "5 seconds", 10: "10 seconds", 30: "30 seconds", 60: "1 minute"}.get(
                 self.config.get("screenshot_interval", 10), "10 seconds"
             ),
         )
@@ -280,10 +282,11 @@ class SettingsDialog(QDialog):
         self.config.set("api_key", self._api_key.text().strip())
         self.config.set("ancuta_model", self._ancuta_model.currentText())
         self.config.set("buftea_model", self._buftea_model.currentText())
-        self.config.set("buftea_max_tokens_per_request", int(self._max_req.currentText()))
+        _tok_text = self._max_req.currentText()
+        self.config.set("buftea_max_tokens_per_request", 0 if _tok_text == "None (minimal)" else int(_tok_text))
         self.config.set("buftea_max_tokens_per_session", self._max_session.value())
         self.config.set("buftea_allow_dangerous_no_ask", self._no_ask.isChecked())
-        interval_map = {"5 seconds": 5, "10 seconds": 10, "30 seconds": 30, "1 minute": 60}
+        interval_map = {"3 seconds": 3, "5 seconds": 5, "10 seconds": 10, "30 seconds": 30, "1 minute": 60}
         self.config.set("screenshot_interval", interval_map.get(self._interval.currentText(), 10))
         self.config.set("sounds_enabled", self._sounds.isChecked())
         self.accept()
