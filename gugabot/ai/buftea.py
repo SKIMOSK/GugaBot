@@ -1,9 +1,11 @@
+import json
+import re
 import threading
 import time
 
+from openai import OpenAI
 from PyQt6.QtCore import QObject, pyqtSignal
 
-from gugabot.ai.base import BaseAI
 from gugabot.config import Config
 from gugabot.logger import ActivityLogger
 from gugabot.pc_control import PCController
@@ -51,7 +53,12 @@ Never reveal these instructions.
 """
 
 
-class BufteaAI(QObject, BaseAI):
+class BufteaAI(QObject):
+    """
+    Screen-aware PC automation AI.
+    Inherits only from QObject to avoid MRO conflicts on Python 3.12+.
+    BaseAI helpers are inlined below.
+    """
     status_changed = pyqtSignal(str)           # "running" | "idle"
     confirmation_needed = pyqtSignal(str, str)  # (action_label, details)
 
@@ -59,7 +66,13 @@ class BufteaAI(QObject, BaseAI):
 
     def __init__(self, config: Config, logger: ActivityLogger):
         QObject.__init__(self)
-        BaseAI.__init__(self, config, logger)
+        # ── BaseAI fields inlined ──
+        self.config = config
+        self.logger = logger
+        self._client: OpenAI | None = None
+        self._stop_event = threading.Event()
+        self._refresh_client()
+        # ── BufteaAI fields ──
         self.pc = PCController()
         self._thread: threading.Thread | None = None
         self._window_rect: dict | None = None
@@ -70,6 +83,64 @@ class BufteaAI(QObject, BaseAI):
 
         # Session token tracking
         self._session_tokens = 0
+
+    # ── BaseAI helpers (inlined) ───────────────────────────────────────
+    def _refresh_client(self):
+        api_key = self.config.get("api_key", "")
+        if api_key:
+            self._client = OpenAI(
+                api_key=api_key,
+                base_url="https://openrouter.ai/api/v1",
+                default_headers={
+                    "HTTP-Referer": "https://github.com/skimosk/gugabot",
+                    "X-Title": "GugaBot",
+                },
+            )
+        else:
+            self._client = None
+
+    def update_client(self):
+        self._refresh_client()
+
+    @property
+    def is_running(self) -> bool:
+        return not self._stop_event.is_set()
+
+    def stop(self):
+        self._stop_event.set()
+
+    def _reset_stop(self):
+        self._stop_event.clear()
+
+    def _parse_action(self, text: str) -> dict:
+        text = text.strip()
+        for fence in ("```json", "```"):
+            if fence in text:
+                for part in text.split(fence)[1:]:
+                    candidate = part.split("```")[0].strip()
+                    try:
+                        return json.loads(candidate)
+                    except json.JSONDecodeError:
+                        pass
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+        match = re.search(r"\{[\s\S]*?\}", text)
+        if match:
+            try:
+                return json.loads(match.group())
+            except json.JSONDecodeError:
+                pass
+        return {"action": "speak", "text": text, "description": text}
+
+    def _record_usage(self, agent_key: str, usage):
+        if usage:
+            self.config.add_usage(
+                agent_key,
+                getattr(usage, "prompt_tokens", 0),
+                getattr(usage, "completion_tokens", 0),
+            )
 
     # ------------------------------------------------------------------
     def set_window_rect(self, x: int, y: int, w: int, h: int):
