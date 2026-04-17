@@ -345,9 +345,6 @@ class MainWindow(QMainWindow):
         bar.setFixedHeight(34)
         lay = QHBoxLayout(bar)
         lay.setContentsMargins(16, 0, 16, 0)
-        self._model_lbl = QLabel(self._model_text())
-        self._model_lbl.setObjectName("status_bar_text")
-        lay.addWidget(self._model_lbl)
         lay.addStretch()
         self._token_lbl = QLabel(self._token_text())
         self._token_lbl.setObjectName("status_bar_text")
@@ -630,7 +627,6 @@ class MainWindow(QMainWindow):
             self.buftea.update_client()
             self.vasilas.update_client()
             self.sounds.enabled = self.config.get("sounds_enabled", True)
-            self._model_lbl.setText(self._model_text())
             self._token_lbl.setText(self._token_text())
 
     def _clear_log(self):

@@ -32,26 +32,28 @@ DANGEROUS_ACTIONS = frozenset({
 ORCHESTRATOR_PROMPT = """You plan PC automation tasks. Be maximally concise — no filler, no explanations.
 Output ONLY valid JSON, one of two forms:
 
-Consult expert:  {"consult": "<specific question>"}
-Finalize plan:   {"plan": [{"step": 1, "description": "<what to do>", "hint": "<method/approach>"}, ...]}
+Consult expert:  {"consult": "<task context> | <specific question>"}
+Finalize plan:   {"plan": [{"step": 1, "description": "<what to do>", "hint": "<exact method>", "prefer": "command|shortcut|type|click"}, ...]}
 
 CONSULT EXPERT FOR:
-- Complex creative writing, storytelling, persuasive text
-- Coding tasks requiring significant logic or architecture decisions
+- Complex creative writing, storytelling, persuasive text (tell expert the topic, length, tone, audience)
+- Coding tasks requiring logic or architecture decisions (tell expert what language, what it should do)
 - Math, physics, chemistry, scientific reasoning
-- Image analysis or interpretation requiring deep understanding
-- Any question where a significantly better answer truly matters
+- Image analysis requiring deep understanding
+Always include full task context in the consult question — not just what you need, but WHY.
 
 DO NOT CONSULT EXPERT FOR:
-- Terminal commands to open or control apps (you know these)
-- Keyboard shortcuts and hotkeys
-- Basic automation steps (screenshot, click, type, open app)
-- Simple procedural tasks with obvious solutions
-Answer these yourself and go directly to producing the plan.
+- Terminal commands, keyboard shortcuts, opening apps, screenshots — answer these yourself.
 
-- Maximum 4 consultations before producing the plan.
-- Each plan step is self-contained and executed by a vision AI that sees the screen.
-- Steps must be concrete: which app, what action, what input."""
+PLAN RULES — PREFER IN THIS ORDER:
+1. terminal_command — open apps, create files, run anything
+2. press_key — shortcuts (Win+D, Alt+F4, Ctrl+S, etc.)
+3. type_text — fill text fields, write content
+4. activate_window then type — for windows that must be focused first
+5. click — LAST RESORT only when nothing else works
+Avoid clicks wherever possible. A .txt file should be created with a terminal command, not by navigating menus.
+Each step must be self-contained and safe to run blindly — the executor does NOT verify before acting.
+- Maximum 4 consultations before producing the plan."""
 
 EXPERT_PROMPT = """Answer with precision and maximum brevity. No greetings, no filler.
 Provide: exact methods, creative content, optimal approaches, specific values.
@@ -59,11 +61,17 @@ Your answer feeds directly into an automation plan."""
 
 EXECUTOR_PROMPT = """PC automation executor. One action per response. JSON only — no prose.
 
-ACTION PRIORITY (use in order):
-1. press_key   — hotkeys/shortcuts first
-2. terminal_command — launch apps, run commands
-3. type_text   — text input
-4. activate_window + wait + click — last resort; always focus before clicking
+ACTION PRIORITY (use in order — never skip to a lower priority if a higher one works):
+1. terminal_command — open apps, create files, run commands; ALWAYS preferred over clicking
+2. press_key   — shortcuts and hotkeys (Win+R, Alt+F4, Ctrl+S, Win+D, etc.)
+3. type_text   — enter text into already-focused fields
+4. activate_window — focus a window before interacting with it
+5. click — ABSOLUTE LAST RESORT; only when there is no command, shortcut, or keyboard way
+
+Never click to open an app if a terminal command can do it.
+Never click a save dialog if Ctrl+S works.
+Never click a text field if you can activate_window and type_text.
+If a window needs to be active before typing, use activate_window first, then type_text.
 
 ACTIONS:
 {"action":"activate_window","title":"<substring>","description":"..."}
@@ -284,7 +292,7 @@ class VasilasAI(QObject):
                         expert,
                         [
                             {"role": "system", "content": EXPERT_PROMPT},
-                            {"role": "user",   "content": question},
+                            {"role": "user",   "content": f"Overall task: {task}\n\n{question}"},
                         ],
                     )
                 except Exception as exc:
